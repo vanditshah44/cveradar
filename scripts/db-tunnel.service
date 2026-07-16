@@ -1,0 +1,49 @@
+# db-tunnel.service — systemd USER service for auto-starting the DB tunnel
+# on local machine boot.
+#
+# Install (run once on your local machine):
+#
+#   mkdir -p ~/.config/systemd/user/
+#   cp /path/to/CVERadar/scripts/db-tunnel.service ~/.config/systemd/user/cveradar-db-tunnel.service
+#
+#   # Edit the copied file — fill in SSH_HOST (see your ~/.ssh/config alias)
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now cveradar-db-tunnel
+#
+# Manage:
+#   systemctl --user status  cveradar-db-tunnel
+#   systemctl --user stop    cveradar-db-tunnel   # → production shows maintenance
+#   systemctl --user start   cveradar-db-tunnel   # → production comes back online
+#   journalctl --user -u cveradar-db-tunnel -f    # live logs
+
+[Unit]
+Description=CVERadar reverse DB tunnel (local Postgres → production server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# ── Change SSH_HOST to your ~/.ssh/config alias or user@ip ──────────────────
+Environment=SSH_HOST=cveradar-prod
+Environment=LOCAL_DB_PORT=5433
+Environment=REMOTE_DB_PORT=5435
+Environment=AUTOSSH_GATETIME=0
+Environment=AUTOSSH_POLL=30
+
+ExecStart=/usr/bin/autossh -M 20001 -N \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -o Compression=yes \
+  -R ${REMOTE_DB_PORT}:localhost:${LOCAL_DB_PORT} \
+  ${SSH_HOST}
+
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

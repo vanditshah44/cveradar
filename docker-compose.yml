@@ -1,0 +1,122 @@
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  # Primary data store. All 7 tables live here.
+  # Port 5432 is exposed so you can connect with psql/pgAdmin locally.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cveradar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cveradar}
+      POSTGRES_DB: ${POSTGRES_DB:-cveradar}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cveradar}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  # Celery broker (tasks go in) + result backend (task results come out).
+  # Also used for caching API responses later.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI backend ───────────────────────────────────────────────────────
+  # Serves the REST API. Hot-reload via watchfiles (uvicorn --reload).
+  # Depends on postgres + redis being healthy before starting.
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-cveradar}:${POSTGRES_PASSWORD:-cveradar}@postgres:5432/${POSTGRES_DB:-cveradar}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-cveradar}:${POSTGRES_PASSWORD:-cveradar}@postgres:5432/${POSTGRES_DB:-cveradar}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Celery worker ─────────────────────────────────────────────────────────
+  # Executes tasks: NVD sync, KEV sync, EPSS sync, matching, notifications.
+  # --loglevel=info shows task start/success/failure in docker logs.
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-cveradar}:${POSTGRES_PASSWORD:-cveradar}@postgres:5432/${POSTGRES_DB:-cveradar}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-cveradar}:${POSTGRES_PASSWORD:-cveradar}@postgres:5432/${POSTGRES_DB:-cveradar}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Celery beat ───────────────────────────────────────────────────────────
+  # The scheduler. Fires tasks on their schedule (e.g., NVD sync every hour).
+  # Separate from the worker — beat only schedules, worker only executes.
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+    volumes:
+      - ./backend:/app
+      - beat_data:/app/celerybeat-schedule
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-cveradar}:${POSTGRES_PASSWORD:-cveradar}@postgres:5432/${POSTGRES_DB:-cveradar}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-cveradar}:${POSTGRES_PASSWORD:-cveradar}@postgres:5432/${POSTGRES_DB:-cveradar}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  # ── Next.js frontend ──────────────────────────────────────────────────────
+  # Dev server with hot reload. Proxies /api/* to FastAPI.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    command: npm run dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # named volume so node_modules isn't overwritten by bind mount
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000   # used by browser (public)
+      - INTERNAL_API_URL=http://api:8000            # used by Next.js server for rewrites
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  beat_data:

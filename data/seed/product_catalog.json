@@ -1,0 +1,58 @@
+[
+  {"display_name": "Nginx", "vendor": "nginx", "cpe_product": "nginx", "category": "web_server", "popular": true},
+  {"display_name": "Apache HTTP Server", "vendor": "apache", "cpe_product": "http_server", "category": "web_server", "popular": true},
+  {"display_name": "Caddy", "vendor": "caddyserver", "cpe_product": "caddy", "category": "web_server", "popular": false},
+  {"display_name": "Traefik", "vendor": "traefik", "cpe_product": "traefik", "category": "web_server", "popular": true},
+  {"display_name": "HAProxy", "vendor": "haproxy", "cpe_product": "haproxy", "category": "web_server", "popular": false},
+
+  {"display_name": "PostgreSQL", "vendor": "postgresql", "cpe_product": "postgresql", "category": "database", "popular": true},
+  {"display_name": "MySQL", "vendor": "mysql", "cpe_product": "mysql", "category": "database", "popular": true},
+  {"display_name": "MariaDB", "vendor": "mariadb", "cpe_product": "mariadb", "category": "database", "popular": true},
+  {"display_name": "MongoDB", "vendor": "mongodb", "cpe_product": "mongodb", "category": "database", "popular": true},
+  {"display_name": "Redis", "vendor": "redis", "cpe_product": "redis", "category": "database", "popular": true},
+  {"display_name": "SQLite", "vendor": "sqlite", "cpe_product": "sqlite", "category": "database", "popular": false},
+
+  {"display_name": "WordPress", "vendor": "wordpress", "cpe_product": "wordpress", "category": "cms", "popular": true},
+  {"display_name": "Drupal", "vendor": "drupal", "cpe_product": "drupal", "category": "cms", "popular": false},
+  {"display_name": "Joomla", "vendor": "joomla", "cpe_product": "joomla!", "category": "cms", "popular": false},
+  {"display_name": "Ghost", "vendor": "ghost", "cpe_product": "ghost", "category": "cms", "popular": false},
+
+  {"display_name": "Nextcloud", "vendor": "nextcloud", "cpe_product": "nextcloud", "category": "self_hosted", "popular": true},
+  {"display_name": "Jellyfin", "vendor": "jellyfin", "cpe_product": "jellyfin", "category": "self_hosted", "popular": true},
+  {"display_name": "Plex Media Server", "vendor": "plex", "cpe_product": "plex_media_server", "category": "self_hosted", "popular": true},
+  {"display_name": "Home Assistant", "vendor": "home-assistant", "cpe_product": "home_assistant", "category": "self_hosted", "popular": true},
+  {"display_name": "Pi-hole", "vendor": "pi-hole", "cpe_product": "pi-hole", "category": "self_hosted", "popular": true},
+  {"display_name": "AdGuard Home", "vendor": "adguard", "cpe_product": "adguard_home", "category": "self_hosted", "popular": true},
+  {"display_name": "Gitea", "vendor": "gitea", "cpe_product": "gitea", "category": "self_hosted", "popular": true},
+  {"display_name": "Forgejo", "vendor": "forgejo", "cpe_product": "forgejo", "category": "self_hosted", "popular": false},
+  {"display_name": "Vaultwarden", "vendor": "vaultwarden", "cpe_product": "vaultwarden", "category": "self_hosted", "popular": true},
+  {"display_name": "Immich", "vendor": "immich", "cpe_product": "immich", "category": "self_hosted", "popular": true},
+  {"display_name": "Paperless-ngx", "vendor": "paperless-ngx", "cpe_product": "paperless-ngx", "category": "self_hosted", "popular": false},
+  {"display_name": "Discourse", "vendor": "discourse", "cpe_product": "discourse", "category": "self_hosted", "popular": false},
+
+  {"display_name": "Docker Engine", "vendor": "docker", "cpe_product": "docker", "category": "container", "popular": true},
+  {"display_name": "Kubernetes", "vendor": "kubernetes", "cpe_product": "kubernetes", "category": "container", "popular": true},
+  {"display_name": "Portainer", "vendor": "portainer", "cpe_product": "portainer", "category": "container", "popular": true},
+  {"display_name": "Proxmox VE", "vendor": "proxmox", "cpe_product": "virtual_environment", "category": "container", "popular": true},
+
+  {"display_name": "Node.js", "vendor": "nodejs", "cpe_product": "node.js", "category": "runtime", "popular": true},
+  {"display_name": "Python", "vendor": "python", "cpe_product": "python", "category": "runtime", "popular": true},
+  {"display_name": "PHP", "vendor": "php", "cpe_product": "php", "category": "runtime", "popular": true},
+  {"display_name": "OpenJDK", "vendor": "oracle", "cpe_product": "openjdk", "category": "runtime", "popular": false},
+  {"display_name": "Go", "vendor": "golang", "cpe_product": "go", "category": "runtime", "popular": false},
+
+  {"display_name": "Ubuntu", "vendor": "canonical", "cpe_product": "ubuntu_linux", "category": "os", "popular": true},
+  {"display_name": "Debian", "vendor": "debian", "cpe_product": "debian_linux", "category": "os", "popular": true},
+  {"display_name": "Alpine Linux", "vendor": "alpinelinux", "cpe_product": "alpine_linux", "category": "os", "popular": false},
+  {"display_name": "OpenSSH", "vendor": "openbsd", "cpe_product": "openssh", "category": "os", "popular": true},
+  {"display_name": "OpenSSL", "vendor": "openssl", "cpe_product": "openssl", "category": "os", "popular": true},
+  {"display_name": "curl", "vendor": "haxx", "cpe_product": "curl", "category": "os", "popular": false},
+  {"display_name": "WireGuard", "vendor": "wireguard", "cpe_product": "wireguard", "category": "os", "popular": true},
+
+  {"display_name": "Grafana", "vendor": "grafana", "cpe_product": "grafana", "category": "monitoring", "popular": true},
+  {"display_name": "Prometheus", "vendor": "prometheus", "cpe_product": "prometheus", "category": "monitoring", "popular": true},
+  {"display_name": "Zabbix", "vendor": "zabbix", "cpe_product": "zabbix", "category": "monitoring", "popular": false},
+
+  {"display_name": "Postfix", "vendor": "postfix", "cpe_product": "postfix", "category": "mail", "popular": false},
+  {"display_name": "Dovecot", "vendor": "dovecot", "cpe_product": "dovecot", "category": "mail", "popular": false}
+]

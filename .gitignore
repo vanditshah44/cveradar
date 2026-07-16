@@ -1,0 +1,54 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Local deploy scratch (contains real secrets + screenshots — never commit)
+hostedshit/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Alembic
+backend/celerybeat-schedule
+backend/celerybeat.pid
+backend/tmp/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Docker
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Stale embedded snapshot copy — excluded from the real repo
+cveradarr/
+
+# Non-code files — not needed to run or deploy CVERadar
+/.codex
+/.env.example
+/.env.directadmin.example
+/CVE_RADAR_PROJECT_BRIEF.md
+/CVE_RADAR_IMPLEMENTATION_CHECKLIST.md
+/Pasted image.png
+/cve_radar_architecture.svg
+/cve_radar_database_schema.html
+/smtptest.py
+/Tutorials/
+/docs/

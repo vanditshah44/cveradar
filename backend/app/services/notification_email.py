@@ -374,8 +374,44 @@ def _render_match_context_rows(contexts: list[MatchEmailContext], limit: int = 2
 
 # ── KEV Alert Email ────────────────────────────────────────────────────────────
 
-def build_kev_alert_email(db: Session, user: User, cve: Cve) -> tuple[str, str]:
-    """Build subject + HTML body for an instant KEV alert."""
+def _render_also_exploited_rows(user: User, cves: list[Cve]) -> str:
+    """Compact list of the other CVEs flagged exploited in the same sync."""
+    if not cves:
+        return ""
+
+    rows = []
+    for other in cves:
+        cvss = str(round(other.cvss_score, 1)) if other.cvss_score is not None else "N/A"
+        url = escape(_cve_detail_link(user.email, other.cve_id), quote=True)
+        rows.append(
+            f'<tr><td style="padding:6px 0;border-bottom:1px solid #fee2e2;">'
+            f'<a href="{url}" style="color:#b91c1c;text-decoration:none;font-weight:600;'
+            f'font-size:13px;">{escape(other.cve_id)}</a>'
+            f'<span style="color:#7f1d1d;font-size:12px;"> &middot; CVSS {escape(cvss)}</span>'
+            f'</td></tr>'
+        )
+
+    return f"""
+    <p style="margin:22px 0 6px;font-size:13px;font-weight:700;color:#7f1d1d;">
+      Also newly exploited and affecting your stack ({len(cves)})
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      {''.join(rows)}
+    </table>
+"""
+
+
+def build_kev_alert_email(
+    db: Session, user: User, cve: Cve, also_exploited: list[Cve] | None = None
+) -> tuple[str, str]:
+    """Build subject + HTML body for an instant KEV alert.
+
+    `cve` is the highest-priority newly-exploited CVE. When a single KEV sync
+    flags several CVEs affecting this user, the rest are passed in
+    `also_exploited` and listed compactly below the main alert. They used to be
+    dropped entirely: the task sent one email per CVE, and the one-email-per-24h
+    guard silently discarded every alert after the first.
+    """
     contexts = build_match_email_contexts(db, user=user, cve=cve)
     reference = pick_useful_reference(cve)
     priority = round(compute_priority(cve.cvss_score, cve.epss_score, cve.kev_flag))
@@ -393,8 +429,16 @@ def build_kev_alert_email(db: Session, user: User, cve: Cve) -> tuple[str, str]:
             f'&#x1F517; {escape(_reference_label(reference))}</a>'
         )
     match_rows = _render_match_context_rows(contexts, limit=3)
+    also_exploited = list(also_exploited or [])
+    also_html = _render_also_exploited_rows(user, also_exploited)
 
-    subject = f"[CVE Radar] URGENT: {cve.cve_id} is now actively exploited — check your stack"
+    if also_exploited:
+        subject = (
+            f"[CVE Radar] URGENT: {cve.cve_id} and {len(also_exploited)} more "
+            f"are now actively exploited — check your stack"
+        )
+    else:
+        subject = f"[CVE Radar] URGENT: {cve.cve_id} is now actively exploited — check your stack"
 
     body_content = f"""
 <!-- Header -->
@@ -471,6 +515,7 @@ def build_kev_alert_email(db: Session, user: User, cve: Cve) -> tuple[str, str]:
     <table width="100%" cellpadding="0" cellspacing="0" border="0">
       {match_rows}
     </table>
+    {also_html}
 
     <!-- CTA buttons -->
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;">

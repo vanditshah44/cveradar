@@ -28,6 +28,7 @@ from app.models.notification import Notification
 from app.models.user import User
 from app.models.cve import Cve
 from app.services.notification_email import build_daily_digest_email, build_kev_alert_email
+from app.services.priority import compute_priority
 from app.services.structured_logging import log_structured_event
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,16 @@ def _claim_notification_attempt(
     cve_ids: list[str],
     idempotency_key: str,
 ):
-    """Insert a processing record once so duplicate tasks do not re-send."""
+    """Insert a processing record once so duplicate tasks do not re-send.
+
+    A previous attempt that ended in "failed" is re-claimed rather than skipped.
+    With on_conflict_do_nothing the failed row won permanently, so a send that
+    lost to a transient SMTP/relay error could never be retried — and for
+    instant_kev, whose key has no date bucket, that alert was lost for good.
+    Rows in any other state (processing/sent/previewed) still return NULL here,
+    which the callers treat as "already handled".
+    """
+    now = datetime.now(timezone.utc)
     stmt = (
         pg_insert(Notification)
         .values(
@@ -93,10 +103,14 @@ def _claim_notification_attempt(
             notification_type=notification_type,
             idempotency_key=idempotency_key,
             cve_ids=_normalize_cve_ids(cve_ids),
-            attempted_at=datetime.now(timezone.utc),
+            attempted_at=now,
             status="processing",
         )
-        .on_conflict_do_nothing(index_elements=["idempotency_key"])
+        .on_conflict_do_update(
+            index_elements=["idempotency_key"],
+            set_={"attempted_at": now, "status": "processing", "error_message": None},
+            where=(Notification.status == "failed"),
+        )
         .returning(Notification.id)
     )
     notification_id = db.execute(stmt).scalar_one_or_none()
@@ -206,6 +220,12 @@ def send_instant_kev_alerts(cve_ids: list[str]) -> dict:
     errors = 0
 
     with SyncSessionLocal() as db:
+        # Collect every affected user first, then send ONE email per user covering
+        # all of their newly-exploited CVEs. Sending per-CVE meant the
+        # one-email-per-24h guard delivered the first alert and silently dropped
+        # the rest — and because KEV only reports CVEs whose flag changed in that
+        # run, those alerts were never retried.
+        cves_by_user: dict = {}
         for cve_id in _normalize_cve_ids(cve_ids):
             cve = db.get(Cve, cve_id)
             if not cve:
@@ -224,100 +244,109 @@ def send_instant_kev_alerts(cve_ids: list[str]) -> dict:
                 ).scalars().all()
             )
 
-            user_ids_to_notify = _candidate_user_ids_for_kev_matches(matches)
+            for user_id in _candidate_user_ids_for_kev_matches(matches):
+                cves_by_user.setdefault(user_id, []).append(cve)
 
-            for user_id in user_ids_to_notify:
-                user = db.get(User, user_id)
-                if not user:
-                    continue
+        for user_id in sorted(cves_by_user, key=str):
+            user_cves = cves_by_user[user_id]
+            # Most urgent first, so the headline CVE leads the email.
+            user_cves.sort(
+                key=lambda c: compute_priority(c.cvss_score, c.epss_score, c.kev_flag),
+                reverse=True,
+            )
+            primary, others = user_cves[0], user_cves[1:]
+            normalized_cve_ids = _normalize_cve_ids([c.cve_id for c in user_cves])
 
-                # Hard rate limit: 1 email per user per 24 hours
-                if _user_received_email_in_last_24h(db, user_id):
-                    _log_notification_attempt(
-                        notification_type="instant_kev",
-                        user_id=user_id,
-                        cve_ids=[cve_id],
-                        result="skipped_rate_limited",
-                        idempotency_key=f"rate_limited:{user_id}:{cve_id}",
-                    )
-                    continue
+            user = db.get(User, user_id)
+            if not user:
+                continue
 
-                normalized_cve_ids = [cve_id]
-                idempotency_key = _build_notification_idempotency_key(
-                    "instant_kev",
-                    user_id,
-                    normalized_cve_ids,
-                )
-                notification_id = _claim_notification_attempt(
-                    db,
-                    user_id=user_id,
+            # Hard rate limit: 1 email per user per 24 hours
+            if _user_received_email_in_last_24h(db, user_id):
+                _log_notification_attempt(
                     notification_type="instant_kev",
+                    user_id=user_id,
                     cve_ids=normalized_cve_ids,
+                    result="skipped_rate_limited",
+                    idempotency_key=f"rate_limited:{user_id}:{primary.cve_id}",
+                )
+                continue
+
+            idempotency_key = _build_notification_idempotency_key(
+                "instant_kev",
+                user_id,
+                normalized_cve_ids,
+            )
+            notification_id = _claim_notification_attempt(
+                db,
+                user_id=user_id,
+                notification_type="instant_kev",
+                cve_ids=normalized_cve_ids,
+                idempotency_key=idempotency_key,
+            )
+            if notification_id is None:
+                skipped_duplicate += 1
+                _log_notification_attempt(
+                    notification_type="instant_kev",
+                    user_id=user_id,
+                    cve_ids=normalized_cve_ids,
+                    result="skipped_duplicate",
                     idempotency_key=idempotency_key,
                 )
-                if notification_id is None:
-                    skipped_duplicate += 1
-                    _log_notification_attempt(
-                        notification_type="instant_kev",
-                        user_id=user_id,
-                        cve_ids=normalized_cve_ids,
-                        result="skipped_duplicate",
-                        idempotency_key=idempotency_key,
-                    )
-                    continue
+                continue
 
-                try:
-                    delivery_result = _send_kev_alert_email(db, user, cve)
-                    delivery_state = delivery_result.get("delivery_state", "sent")
-                    status = _notification_status_from_delivery_state(delivery_state)
-                    _complete_notification_attempt(
-                        db,
-                        notification_id,
-                        status=status,
-                        delivery_result=delivery_result,
-                    )
-                    _log_notification_attempt(
-                        notification_type="instant_kev",
-                        user_id=user_id,
-                        cve_ids=normalized_cve_ids,
-                        result=status,
-                        idempotency_key=idempotency_key,
-                        extra=delivery_state,
-                    )
-                    if status == "sent":
-                        sent_count += 1
-                    elif status == "previewed":
-                        previewed_count += 1
-                    else:
-                        skipped_delivery += 1
-                except Exception as e:
-                    log_structured_event(
-                        logger,
-                        logging.ERROR,
-                        "notification_delivery_failed",
-                        task_name="app.tasks.notifications.send_instant_kev_alerts",
-                        notification_type="instant_kev",
-                        user_id=user_id,
-                        cve_id=cve_id,
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                    _complete_notification_attempt(
-                        db,
-                        notification_id,
-                        status="failed",
-                        error_message=str(e),
-                        delivery_result={"delivery_state": "failed"},
-                    )
-                    _log_notification_attempt(
-                        notification_type="instant_kev",
-                        user_id=user_id,
-                        cve_ids=normalized_cve_ids,
-                        result="failed",
-                        idempotency_key=idempotency_key,
-                        extra=str(e),
-                    )
-                    errors += 1
+            try:
+                delivery_result = _send_kev_alert_email(db, user, primary, others)
+                delivery_state = delivery_result.get("delivery_state", "sent")
+                status = _notification_status_from_delivery_state(delivery_state)
+                _complete_notification_attempt(
+                    db,
+                    notification_id,
+                    status=status,
+                    delivery_result=delivery_result,
+                )
+                _log_notification_attempt(
+                    notification_type="instant_kev",
+                    user_id=user_id,
+                    cve_ids=normalized_cve_ids,
+                    result=status,
+                    idempotency_key=idempotency_key,
+                    extra=delivery_state,
+                )
+                if status == "sent":
+                    sent_count += 1
+                elif status == "previewed":
+                    previewed_count += 1
+                else:
+                    skipped_delivery += 1
+            except Exception as e:
+                log_structured_event(
+                    logger,
+                    logging.ERROR,
+                    "notification_delivery_failed",
+                    task_name="app.tasks.notifications.send_instant_kev_alerts",
+                    notification_type="instant_kev",
+                    user_id=user_id,
+                    cve_ids=normalized_cve_ids,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                _complete_notification_attempt(
+                    db,
+                    notification_id,
+                    status="failed",
+                    error_message=str(e),
+                    delivery_result={"delivery_state": "failed"},
+                )
+                _log_notification_attempt(
+                    notification_type="instant_kev",
+                    user_id=user_id,
+                    cve_ids=normalized_cve_ids,
+                    result="failed",
+                    idempotency_key=idempotency_key,
+                    extra=str(e),
+                )
+                errors += 1
 
     return {
         "sent": sent_count,
@@ -467,11 +496,11 @@ def send_daily_digests() -> dict:
     }
 
 
-def _send_kev_alert_email(db, user: User, cve: Cve) -> dict:
-    """Send a KEV instant alert email via Resend."""
+def _send_kev_alert_email(db, user: User, cve: Cve, also_exploited: list[Cve] | None = None) -> dict:
+    """Send a KEV instant alert covering `cve` plus any other newly-exploited CVEs."""
     from app.services.email import send_email
 
-    subject, body = build_kev_alert_email(db, user, cve)
+    subject, body = build_kev_alert_email(db, user, cve, also_exploited)
     return send_email(to=user.email, subject=subject, html=body)
 
 

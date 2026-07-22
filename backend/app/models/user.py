@@ -29,8 +29,11 @@ class User(Base):
         DateTime(timezone=True), nullable=True,
         comment="Updated on each dashboard visit; used to compute 'new since last visit'"
     )
-    daily_digest: Mapped[bool] = mapped_column(Boolean, default=True)
-    instant_alerts: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Email notifications are opt-in: new accounts start with both off and the
+    # user turns them on from Settings. Never default these to True — sending
+    # unrequested email to a fresh signup is what gets a domain marked as spam.
+    daily_digest: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    instant_alerts: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # Relationships (back_populates = bidirectional, lazy="select" = load on access)
     stack_items: Mapped[list["StackItem"]] = relationship(

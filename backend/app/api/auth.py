@@ -87,7 +87,10 @@ async def request_magic_link(body: MagicLinkRequest, request: Request):
     token = create_magic_link_token(str(body.email))
     link = f"{settings.FRONTEND_URL}/auth/verify?token={token}"
 
-    if not settings.RESEND_API_KEY:
+    # Email is configured if EITHER provider is set: Resend (RESEND_API_KEY) or
+    # SMTP (SMTP_HOST). The app sends via SMTP, so this must not gate on Resend alone.
+    email_configured = bool(settings.RESEND_API_KEY) or bool(settings.SMTP_HOST)
+    if not email_configured:
         if not settings.DEBUG:
             # Production with no email provider configured — refuse rather than leaking the token
             raise HTTPException(
@@ -96,7 +99,7 @@ async def request_magic_link(body: MagicLinkRequest, request: Request):
             )
         # Dev only: return the link directly so the full auth flow can be tested locally
         return {
-            "message": "Dev mode: no RESEND_API_KEY set. Use the link below to sign in.",
+            "message": "Dev mode: no email provider set. Use the link below to sign in.",
             "dev_link": link,
         }
 

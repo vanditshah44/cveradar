@@ -7,7 +7,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
 COPY package.json package-lock.json* ./
-RUN npm ci
+# --include=dev is required: NODE_ENV=production above makes npm omit
+# devDependencies, but the build needs tailwindcss, postcss, autoprefixer
+# and typescript from there. Only the builder stage installs them; the
+# runtime stage ships just the standalone output.
+RUN npm ci --include=dev
 
 COPY . .
 

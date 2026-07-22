@@ -27,8 +27,14 @@ logger = logging.getLogger(__name__)
 def _resolve_delivery_mode() -> str:
     mode = settings.EMAIL_DELIVERY_MODE.strip().lower()
     if mode == "auto":
+        # SMTP is blocked on many cloud hosts (e.g. Railway). Prefer HTTP paths:
+        # a relay (your own SMTP via a reachable box) or Resend, then SMTP.
+        if settings.MAIL_RELAY_URL:
+            return "relay"
+        if settings.RESEND_API_KEY:
+            return "resend"
         return "smtp" if settings.SMTP_HOST else "preview"
-    if mode in {"smtp", "preview"}:
+    if mode in {"smtp", "preview", "resend", "relay"}:
         return mode
     raise ValueError(f"Unsupported EMAIL_DELIVERY_MODE: {settings.EMAIL_DELIVERY_MODE!r}")
 
@@ -94,6 +100,48 @@ def _send_via_smtp(to: str, subject: str, html: str) -> None:
             server.sendmail(settings.SMTP_USER, [to], msg.as_string())
 
 
+def _send_via_relay(to: str, subject: str, html: str) -> None:
+    """Hand the message to a mail relay over HTTPS.
+
+    The relay runs on a host that can reach the SMTP server (e.g. the DirectAdmin
+    box) and does the actual SMTP send. Used because cloud hosts block outbound
+    SMTP. Requires MAIL_RELAY_URL and MAIL_RELAY_SECRET.
+    """
+    if not settings.MAIL_RELAY_URL:
+        raise RuntimeError("MAIL_RELAY_URL is not configured — cannot send email")
+    import httpx
+
+    resp = httpx.post(
+        settings.MAIL_RELAY_URL.rstrip("/") + "/send",
+        headers={"X-Relay-Secret": settings.MAIL_RELAY_SECRET},
+        json={"to": to, "subject": subject, "html": html},
+        timeout=25.0,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Mail relay error {resp.status_code}: {resp.text[:300]}")
+
+
+def _send_via_resend(to: str, subject: str, html: str) -> None:
+    """Send a single email via the Resend HTTP API.
+
+    Works on hosts that block outbound SMTP (Railway, most PaaS). Requires
+    RESEND_API_KEY, and FROM_EMAIL must use a domain verified in Resend (or the
+    resend.dev test sender for sending to your own account email).
+    """
+    if not settings.RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY is not configured — cannot send email")
+    import httpx
+
+    resp = httpx.post(
+        "https://api.resend.com/emails",
+        headers={"Authorization": f"Bearer {settings.RESEND_API_KEY}"},
+        json={"from": settings.FROM_EMAIL, "to": [to], "subject": subject, "html": html},
+        timeout=15.0,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Resend API error {resp.status_code}: {resp.text[:300]}")
+
+
 def send_email(to: str, subject: str, html: str) -> dict:
     """Send a transactional email.
 
@@ -105,6 +153,16 @@ def send_email(to: str, subject: str, html: str) -> dict:
     if mode == "preview":
         path = write_email_preview(to=to, subject=subject, html=html)
         return {"provider": "preview", "delivery_state": "preview", "preview_path": path}
+
+    if mode == "relay":
+        _send_via_relay(to=to, subject=subject, html=html)
+        logger.info("email_sent provider=relay to=%s subject=%r", to, subject)
+        return {"provider": "relay", "delivery_state": "sent"}
+
+    if mode == "resend":
+        _send_via_resend(to=to, subject=subject, html=html)
+        logger.info("email_sent provider=resend to=%s subject=%r", to, subject)
+        return {"provider": "resend", "delivery_state": "sent"}
 
     # mode == "smtp"
     _send_via_smtp(to=to, subject=subject, html=html)

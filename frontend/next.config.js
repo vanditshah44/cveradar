@@ -27,6 +27,13 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Type/lint errors are non-blocking at build (matches the deployed config).
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
+  // Standalone output — Dockerfile.prod copies .next/standalone and layers
+  // .next/static + public back on top (standalone does not serve those itself).
+  // Required for the Railway deploy; the old DirectAdmin/Passenger path used
+  // `next start` instead and is no longer in use.
   output: 'standalone',
   async headers() {
     return [

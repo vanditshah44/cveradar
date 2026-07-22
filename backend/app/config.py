@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     SMTP_USE_SSL: bool = True     # True for port 465, False for 587 (STARTTLS)
     FROM_EMAIL: str = "CVE Radar <alerts@yourdomain.com>"
 
+    # ── Mail relay ────────────────────────────────────────────────────────────
+    # Cloud hosts (Railway) block outbound SMTP. To keep using your own SMTP,
+    # POST the message over HTTPS to a relay running on a box that CAN reach the
+    # mail server (e.g. your DirectAdmin server). Set EMAIL_DELIVERY_MODE=relay.
+    MAIL_RELAY_URL: str = ""      # e.g. https://api.cveradar.vanditshah.com
+    MAIL_RELAY_SECRET: str = ""   # shared secret, sent as the X-Relay-Secret header
+
     # ── App ───────────────────────────────────────────────────────────────────
     DEBUG: bool = False
     FRONTEND_URL: str = "http://localhost:3000"

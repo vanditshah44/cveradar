@@ -190,7 +190,19 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   // 204 No Content (e.g. DELETE) — no body to parse
   if (res.status === 204) return undefined as T
 
-  return res.json()
+  // A 2xx can still arrive with an empty or truncated body if a proxy cuts the
+  // response short. res.json() would surface that as a raw DOMException
+  // ("Unexpected end of JSON input"), which tells the user nothing — parse it
+  // ourselves so the failure is named and the Retry button reads as the fix.
+  const raw = await res.text()
+  if (!raw.trim()) {
+    throw new Error('The server returned an empty response. This is usually temporary — please retry.')
+  }
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    throw new Error('The server returned a malformed response. This is usually temporary — please retry.')
+  }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -265,6 +277,9 @@ export const cves = {
   markSeen: (id: string) => apiFetch<{ ok: boolean; seen_at: string }>(`/api/cves/${id}/seen`, { method: 'POST' }),
 
   dismiss: (id: string) => apiFetch(`/api/cves/${id}/dismiss`, { method: 'POST' }),
+
+  /** Undo a dismissal — puts the CVE back on the dashboard. */
+  restore: (id: string) => apiFetch(`/api/cves/${id}/restore`, { method: 'POST' }),
 }
 
 // ── Products ──────────────────────────────────────────────────────────────────
@@ -283,9 +298,16 @@ export const stats = {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
+export interface NotificationPrefs {
+  daily_digest: boolean
+  instant_alerts: boolean
+}
+
 export const settings = {
-  get: () => apiFetch<{ daily_digest: boolean; instant_alerts: boolean }>('/api/settings'),
-  update: (prefs: { daily_digest: boolean; instant_alerts: boolean }) =>
-    apiFetch('/api/settings', { method: 'PUT', body: JSON.stringify(prefs) }),
+  get: () => apiFetch<NotificationPrefs>('/api/settings'),
+  // The type argument matters: without it this resolved to Promise<unknown>,
+  // and the settings page could not spread the server response into its cache.
+  update: (prefs: NotificationPrefs) =>
+    apiFetch<NotificationPrefs>('/api/settings', { method: 'PUT', body: JSON.stringify(prefs) }),
   deleteAccount: () => apiFetch('/api/account', { method: 'DELETE' }),
 }

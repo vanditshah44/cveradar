@@ -112,9 +112,12 @@ export function Navbar() {
               </div>
               <div className="h-4 w-px bg-wire-2 hidden sm:block" />
               <NavLink href="/settings" label="Settings" active={router.pathname === '/settings'} />
+              {/* Hidden below sm: logo + nav links + Settings + Sign out measured
+                  433px against a 390px viewport, so every page scrolled sideways
+                  on a phone. Settings (one tap away) carries its own Sign out. */}
               <button
                 onClick={handleLogout}
-                className="text-[13px] font-medium text-ink-2 hover:text-crit transition-colors duration-200 px-2 py-1 rounded border border-transparent hover:border-crit/20 hover:bg-crit/5"
+                className="hidden sm:block text-[13px] font-medium text-ink-2 hover:text-crit transition-colors duration-200 px-2 py-1 rounded border border-transparent hover:border-crit/20 hover:bg-crit/5"
               >
                 Sign out
               </button>

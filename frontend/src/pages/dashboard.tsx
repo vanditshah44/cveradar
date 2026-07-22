@@ -348,6 +348,8 @@ export default function DashboardPage() {
   const { user, isLoading: userLoading } = useUser()
   const [filters, setFilters] = useState(defaultFilters)
   const [page, setPage] = useState(1)
+  // CVE id of the most recent dismissal, so it can be undone.
+  const [undoDismiss, setUndoDismiss] = useState<string | null>(null)
   const hasRedirectedToOnboarding = useRef(false)
   const hasMarkedDashboardVisit = useRef(false)
 
@@ -472,7 +474,19 @@ export default function DashboardPage() {
     }, { revalidate: false })
     // Fire API + refresh stats; on failure, revalidate to restore correct state
     cves.dismiss(cveId)
-      .then(() => void mutateStats())
+      .then(() => {
+        void mutateStats()
+        // Dismissing hides a vulnerability from the only view that surfaces it,
+        // so always offer a way back from a misclick.
+        setUndoDismiss(cveId)
+      })
+      .catch(() => { void mutate(); void mutateStats() })
+  }
+
+  const handleUndoDismiss = (cveId: string) => {
+    setUndoDismiss(null)
+    cves.restore(cveId)
+      .then(() => { void mutate(); void mutateStats() })
       .catch(() => { void mutate(); void mutateStats() })
   }
 
@@ -542,6 +556,33 @@ export default function DashboardPage() {
           </button>
         )}
       </div>
+
+      {/* Undo a dismissal — dismissing removes the CVE from the only view that
+          surfaces it, so a misclick needs a way back. */}
+      {undoDismiss && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-wire-1 bg-surface-1 px-4 py-2.5">
+          <p className="text-[13px] text-ink-2">
+            Dismissed <span className="font-mono text-ink-1">{undoDismiss}</span>. It no longer appears on your dashboard.
+          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleUndoDismiss(undoDismiss)}
+              className="px-3 py-1.5 rounded border border-acid/30 bg-acid/8 text-acid text-[12px] font-semibold font-mono hover:bg-acid/15 transition-colors"
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              onClick={() => setUndoDismiss(null)}
+              aria-label="Dismiss this notice"
+              className="px-2 py-1.5 rounded text-ink-3 hover:text-ink-1 text-[12px] transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Threat banner */}
       <ThreatBanner statsData={statsData} score={attackSurfaceScore} />

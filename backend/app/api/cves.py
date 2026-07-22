@@ -409,4 +409,23 @@ async def dismiss_cve(
         .where(UserCveMatch.user_id == current_user.id, UserCveMatch.cve_id == cve_id)
         .values(dismissed=True)
     )
-    return {"ok": True}
+    return {"ok": True, "dismissed": True}
+
+
+@router.post("/{cve_id}/restore", status_code=status.HTTP_200_OK)
+async def restore_cve(
+    cve_id: CveIdPath,
+    current_user: User = Depends(get_current_user_dep),
+    db: AsyncSession = Depends(get_db),
+):
+    """Undo a dismissal and put the CVE back on the dashboard.
+
+    Dismissing used to be one-way with no endpoint to reverse it, so a misclick
+    permanently hid a vulnerability from the only view that surfaces it.
+    """
+    await db.execute(
+        update(UserCveMatch)
+        .where(UserCveMatch.user_id == current_user.id, UserCveMatch.cve_id == cve_id)
+        .values(dismissed=False)
+    )
+    return {"ok": True, "dismissed": False}

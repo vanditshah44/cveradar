@@ -291,7 +291,13 @@ def match_cve_against_stacks(db, cve_id: str) -> int:
             .values(list(rows_to_upsert.values()))
             .on_conflict_do_update(
                 constraint="uq_match",
-                set_={"priority_score": priority, "matched_at": now},
+                # Only the score is recomputed. matched_at must keep the time the
+                # CVE FIRST matched this stack item — refreshing it here made every
+                # routine rematch (EPSS runs nightly, KEV hourly) look like a brand
+                # new discovery, which resets the "new since last visit" badge and,
+                # worse, pulls the whole backlog into the next daily digest because
+                # that query selects on `matched_at >= now - 24h`.
+                set_={"priority_score": priority},
             )
         )
         db.execute(stmt)

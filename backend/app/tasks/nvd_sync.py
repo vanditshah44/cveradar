@@ -303,6 +303,12 @@ def _extract_affected_products(cve_data: dict) -> list[dict]:
                 group_counter += 1
 
                 for leaf_index, entry in enumerate(group):
+                    # An AND node's cartesian product places the SAME entry dict in
+                    # several groups (the platform term is shared by every target
+                    # term). Mutating it in place made the last group win the
+                    # condition_group and appended the shared row once per group,
+                    # so groups came out mis-sized with duplicated platform rows.
+                    entry = dict(entry)
                     entry["condition_group"] = group_id
                     context = dict(entry.get("match_context") or {})
                     context["group_id"] = group_id

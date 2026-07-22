@@ -27,7 +27,20 @@ from app.services.sync_runs import finish_sync_run, start_sync_run
 
 logger = logging.getLogger(__name__)
 
-EPSS_BATCH_SIZE = 2000
+# CVE ids travel in the query string, and api.first.org has two separate traps
+# measured on 2026-07-22:
+#   1. Past ~2.3 KB of URL it returns HTTP 200 with an EMPTY result set — no
+#      error, just silently zero rows. (140 ids/2286 B works, 145/2366 B does
+#      not.) Only past ~7.5 KB does it finally return 414 URI Too Long.
+#   2. `limit` defaults to 100, so any batch over 100 is truncated unless the
+#      request passes limit explicitly.
+# This shipped as 2000, so every batch blew past both limits and no CVE ever
+# received a score, while the task still reported success.
+# 100 ids is ~1.6 KB — well clear of the silent-truncation cliff.
+EPSS_BATCH_SIZE = 100
+
+# Hard ceiling for a single request URL. Stay far below the ~2.3 KB cliff.
+EPSS_MAX_URL_BYTES = 2000
 
 
 @shared_task(
@@ -104,8 +117,28 @@ def sync_epss(self) -> dict:
         "errors": total_errors,
         "matcher_queue": matcher_queue,
     }
-    finish_sync_run(run_id, status="success", details=result)
-    log_structured_event(logger, logging.INFO, "epss_sync_finished", run_id=run_id, **result)
+
+    # Only claim success when every batch landed. This previously reported
+    # "success" unconditionally, so the 414 failures above stayed invisible on
+    # the diagnostics dashboard while no CVE ever received an EPSS score.
+    failed = total_errors > 0
+    error_message = (
+        f"{total_errors} of {len(cve_ids)} CVEs could not be scored "
+        f"({total_updated} updated)"
+    ) if failed else None
+    finish_sync_run(
+        run_id,
+        status="failed" if failed else "success",
+        details=result,
+        error_message=error_message,
+    )
+    log_structured_event(
+        logger,
+        logging.ERROR if failed else logging.INFO,
+        "epss_sync_finished",
+        run_id=run_id,
+        **result,
+    )
     logger.info("EPSS sync complete: %s", result)
     return result
 
@@ -114,9 +147,22 @@ def _fetch_epss_batch(cve_ids: list[str]) -> list[tuple[str, float, float]]:
     """Fetch EPSS scores for a batch of CVE IDs from FIRST.org API.
 
     Returns list of (cve_id, epss_score, epss_percentile) tuples.
+
+    Splits the batch if the request URL would approach the length at which the
+    API starts returning empty results instead of an error (see the constants
+    above). `limit` is always sent explicitly, otherwise the API caps the
+    response at 100 rows and drops the remainder without saying so.
     """
+    if not cve_ids:
+        return []
+
     # API supports ?cve=CVE-1,CVE-2,... (comma-separated)
-    params = {"cve": ",".join(cve_ids)}
+    params = {"cve": ",".join(cve_ids), "limit": len(cve_ids)}
+
+    approx_url_len = len(settings.EPSS_URL) + len(params["cve"]) + 32
+    if approx_url_len > EPSS_MAX_URL_BYTES and len(cve_ids) > 1:
+        mid = len(cve_ids) // 2
+        return _fetch_epss_batch(cve_ids[:mid]) + _fetch_epss_batch(cve_ids[mid:])
 
     with httpx.Client(timeout=60.0) as client:
         response = client.get(settings.EPSS_URL, params=params)

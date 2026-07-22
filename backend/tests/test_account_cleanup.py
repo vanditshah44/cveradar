@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from uuid import uuid4
 
 from app.api.settings import update_settings
 from app.models.match import UserCveMatch
@@ -18,7 +19,8 @@ class FakeAsyncSession:
 
 
 def test_update_settings_flushes_and_returns_saved_values():
-    user = SimpleNamespace(daily_digest=True, instant_alerts=False)
+    # id is required: update_settings emits a structured log carrying user_id.
+    user = SimpleNamespace(id=uuid4(), daily_digest=True, instant_alerts=False)
     db = FakeAsyncSession()
 
     result = asyncio.run(

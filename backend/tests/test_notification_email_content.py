@@ -24,7 +24,8 @@ def test_format_affected_version_range_for_bounded_range():
         version_end_including=False,
     )
 
-    assert format_affected_version_range(requirement) == ">= 1.20.0 and < 1.24.3"
+    # Emails render the bounds with the typographic symbols, not ASCII >=/<=.
+    assert format_affected_version_range(requirement) == "≥ 1.20.0 and < 1.24.3"
 
 
 def test_pick_useful_reference_prefers_vendor_advisory():

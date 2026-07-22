@@ -287,6 +287,12 @@ def register_celery_observability() -> None:
                 for key, value in retval.items()
                 if isinstance(value, (str, int, float, bool)) or value is None
             }
+        # A task's return dict may carry keys we also pass explicitly (e.g.
+        # record_beat_heartbeat returns its own "task_id"). Drop those so they
+        # can't collide — the signal's own values are authoritative.
+        context = extract_task_log_context(getattr(task, "name", None), args, kwargs)
+        reserved = {"service", "task_id", "state", *context}
+        extra_fields = {k: v for k, v in extra_fields.items() if k not in reserved}
         log_structured_event(
             task_logger,
             logging.INFO,
@@ -294,7 +300,7 @@ def register_celery_observability() -> None:
             service="celery",
             task_id=task_id,
             state=state,
-            **extract_task_log_context(getattr(task, "name", None), args, kwargs),
+            **context,
             **extra_fields,
         )
 

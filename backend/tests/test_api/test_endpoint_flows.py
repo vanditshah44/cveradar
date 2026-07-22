@@ -21,6 +21,11 @@ class ScalarResult:
     def scalar_one_or_none(self):
         return self.value
 
+    def all(self):
+        # The stats endpoint's severity-distribution and top-product queries
+        # consume their results with .all() rather than a scalar accessor.
+        return self.value if isinstance(self.value, list) else [self.value]
+
 
 class SequenceSession:
     def __init__(self, values):
@@ -87,7 +92,11 @@ class RowResult:
         return self.rows
 
     def scalars(self):
-        return self
+        # Callers reach ORM entities through .scalars().all(); those live in
+        # scalar_rows, not rows. Returning self here made .scalars().all() hand
+        # back the (empty) row list, so the CVE detail endpoint saw no affected
+        # products and silently fell back to None.
+        return RowResult(rows=self.scalar_rows)
 
     def first(self):
         return self.rows[0] if self.rows else None
@@ -179,7 +188,14 @@ async def test_update_stack_item_returns_updated_version_and_dispatch_state(monk
 
 @pytest.mark.asyncio
 async def test_stats_endpoint_returns_distinct_cve_counts():
-    session = SequenceSession([5, 2, 1, 3])
+    # Queries in order: total, critical, kev, new-since-last-visit, then the
+    # severity-distribution rows and the top-exposed-product rows.
+    severity_rows = [("CVE-1", 9.8), ("CVE-2", 9.1), ("CVE-3", 7.4), ("CVE-4", 5.0)]
+    product_rows = [
+        SimpleNamespace(product_name="nginx", cve_count=3, crit_count=2, kev_count=1),
+        SimpleNamespace(product_name="redis", cve_count=1, crit_count=0, kev_count=0),
+    ]
+    session = SequenceSession([5, 2, 1, 3, severity_rows, product_rows])
     user = SimpleNamespace(id=uuid4(), last_seen_at=datetime.now(timezone.utc))
 
     result = await stats_api.get_stats(current_user=user, db=session)
@@ -188,6 +204,15 @@ async def test_stats_endpoint_returns_distinct_cve_counts():
     assert result.critical_count == 2
     assert result.kev_count == 1
     assert result.new_since_last_visit == 3
+
+    # 9.8 and 9.1 are Critical, 7.4 is High, 5.0 is Medium; empty buckets are dropped.
+    assert [(item.severity, item.count) for item in result.severity_distribution] == [
+        ("Critical", 2),
+        ("High", 1),
+        ("Medium", 1),
+    ]
+    assert [item.name for item in result.top_products] == ["nginx", "redis"]
+    assert result.top_products[0].crit_count == 2
 
 
 @pytest.mark.asyncio
@@ -274,7 +299,7 @@ async def test_cve_detail_endpoint_returns_references_matches_and_affected_range
     assert len(result.matched_stack_items) == 2
     assert result.useful_reference is not None
     assert result.useful_reference.url == "https://vendor.example.com/advisory"
-    assert result.affected_products[0].range_display == ">= 1.20.0 and < 1.24.3"
+    assert result.affected_products[0].range_display == "≥ 1.20.0 and < 1.24.3"
 
 
 @pytest.mark.asyncio
